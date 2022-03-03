@@ -1,7 +1,9 @@
-const { app, BrowserWindow } = require("electron");
+const { app, BrowserWindow, Menu, dialog } = require("electron");
 const path = require("path");
 const { ElectronBlocker } = require("@cliqz/adblocker-electron");
 const { fetch } = require("cross-fetch");
+
+let i = 0;
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
 if (require("electron-squirrel-startup")) {
@@ -9,9 +11,22 @@ if (require("electron-squirrel-startup")) {
   app.quit();
 }
 
+async function startBlocking(session) {
+  global.blocker = await ElectronBlocker.fromLists(fetch, [
+    "https://easylist.to/easylist/easylist.txt",
+    "https://easylist.to/easylist/easyprivacy.txt",
+    // Does not import URLHaus as it breaks Google homepage
+  ]);
+  await global.blocker.enableBlockingInSession(session);
+}
+
+async function endBlocking(session) {
+  await global.blocker.disableBlockingInSession(session);
+}
+
 const createWindow = async () => {
   // Create the browser window.
-  const mainWindow = new BrowserWindow({
+  mainWindow = new BrowserWindow({
     width: 800,
     height: 600,
     webPreferences: {
@@ -22,18 +37,69 @@ const createWindow = async () => {
     },
   });
   mainWindow.setIcon(path.join(__dirname, "logo.png"));
-  mainWindow.setMenu(null);
+  Menu.setApplicationMenu(
+    Menu.buildFromTemplate([
+      {
+        label: "File",
+        submenu: [
+          {
+            label: "New window",
+            click: createWindow,
+          },
+          {
+            label: "Open file",
+            click: async () => {
+              const file = await dialog.showOpenDialog(mainWindow, {
+                properties: ["openFile"],
+              });
+              if (file.filePaths.length) {
+                mainWindow.loadURL(
+                  path.join(__dirname, "index.html") +
+                    "?url=" +
+                    encodeURIComponent(file.filePaths[0])
+                );
+              }
+            },
+          },
+          {
+            label: "Quit",
+            click: app.quit,
+          },
+        ],
+      },
+      {
+        label: "AdBlocker",
+        submenu: [
+          {
+            label: "Disable",
+            click() {
+              endBlocking(mainWindow.webContents.session);
+            },
+          },
+          {
+            label: "Enable",
+            click() {
+              startBlocking(mainWindow.webContents.session);
+            },
+          },
+        ],
+      },
+    ])
+  );
   // and load the index.html of the app.
-  mainWindow.loadFile(path.join(__dirname, "index.html"));
-  const blocker = await ElectronBlocker.fromLists(fetch, [
-    "https://easylist.to/easylist/easylist.txt",
-    "https://easylist.to/easylist/easyprivacy.txt",
-    // Does not import URLHaus as it breaks Google homepage
-  ]);
-  await blocker.enableBlockingInSession(mainWindow.webContents.session);
+  let patha =
+    process.argv.slice(2).length > 0 && i == 0
+      ? path.join(__dirname, "index.html") +
+        "?url=" +
+        encodeURIComponent(process.argv[2])
+      : path.join(__dirname, "index.html");
+  process.argv.slice(2).length > 0 && i == 0
+    ? mainWindow.loadURL(patha)
+    : mainWindow.loadFile(patha);
+  startBlocking(mainWindow.webContents.session);
+  i += 1;
   // Open the DevTools.
   // mainWindow.webContents.openDevTools();
-  // load the icon
 };
 
 // This method will be called when Electron has finished
